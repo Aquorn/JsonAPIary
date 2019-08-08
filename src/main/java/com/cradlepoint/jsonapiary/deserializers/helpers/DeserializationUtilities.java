@@ -10,6 +10,7 @@ import java.lang.reflect.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public class DeserializationUtilities {
 
@@ -242,6 +243,7 @@ public class DeserializationUtilities {
             JsonNode jsonNode) {
         // Fetch the ID object from the json, as the correct object type //
         Field idField = null;
+        Method idMethod = null;
         Class type = objectType;
         while(type != null) {
             for (Field field : type.getDeclaredFields()) {
@@ -250,23 +252,34 @@ public class DeserializationUtilities {
                     break;
                 }
             }
+            if (idField == null) {
+                for (Method method : type.getMethods()) {
+                    if (method.isAnnotationPresent(JsonApiId.class)) {
+                        idMethod = method;
+                        break;
+                    }
+                }
+            }
             type = type.getSuperclass();
         }
 
         // Sanity Check //
-        if(idField == null) {
+        if(idField == null && idMethod == null) {
             String issue = "No \"id\" found in the json when deserializing type: " + objectType.getName();
             throw new IllegalArgumentException(issue);
         }
 
         // Deserialize the ID //
         Object id = null;
-        Class idType = idField.getType();
+        Class idType = idField != null ? idField.getType() : idMethod.getReturnType();
         JsonNode idNode = jsonNode.get(JsonApiKeyConstants.ID_KEY);
         if(idNode == null || idNode.isNull()) {
             id = null;
         } else if(idType == String.class) {
             id = idNode.asText();
+        } else if (idType == UUID.class) {
+            String str = idNode.asText();
+            id = !str.isEmpty() ? UUID.fromString(idNode.asText()) : null;
         } else if(idType == Integer.class || idType == int.class) {
             id = idNode.asInt();
         } else if(idType == Long.class || idType == long.class) {
@@ -313,7 +326,7 @@ public class DeserializationUtilities {
         try {
             idField.set(object, id);
             return;
-        } catch (IllegalAccessException e){
+        } catch (IllegalAccessException|NullPointerException e){
             // Unable to set on the Field directly... time to look for a "setter"
         }
 
@@ -325,9 +338,11 @@ public class DeserializationUtilities {
                 if (method.getName().startsWith("set") && method.isAnnotationPresent(JsonApiId.class)) {
                     idSetMethod = method;
                     break;
-                } else if (method.getName().equals("set" + idField.getName().substring(0, 1).toUpperCase() + idField.getName().substring(1))) {
-                    idSetMethod = method;
-                    break;
+                } else if (idField != null) {
+                    if (method.getName().equals("set" + idField.getName().substring(0, 1).toUpperCase() + idField.getName().substring(1))) {
+                        idSetMethod = method;
+                        break;
+                    }
                 }
             }
             type = type.getSuperclass();

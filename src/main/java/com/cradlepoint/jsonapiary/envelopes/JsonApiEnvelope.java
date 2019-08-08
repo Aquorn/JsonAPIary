@@ -2,19 +2,21 @@ package com.cradlepoint.jsonapiary.envelopes;
 
 import com.cradlepoint.jsonapiary.annotations.JsonApiType;
 import com.cradlepoint.jsonapiary.constants.JsonApiKeyConstants;
+import com.cradlepoint.jsonapiary.serializers.helpers.JsonApiAnnotationAnalyzer;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.URL;
-import java.util.Hashtable;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 public class JsonApiEnvelope<T> {
 
     ////////////////
     // Attributes //
     ////////////////
+
+    private Map<Class<?>, Map<Object, Object>> includes = new HashMap<>();
 
     /**
      * JsonAPI annotated object to be serialized
@@ -55,6 +57,39 @@ public class JsonApiEnvelope<T> {
         this.data = data;
         links = new Hashtable<String, URL>();
         meta = new Hashtable<String, String>();
+    }
+
+    /////////////////////
+    // Include methods //
+    /////////////////////
+
+    public void include(Object object) {
+        Class<?> cls = object.getClass();
+
+        Map<Object, Object> includeObjects = includes.computeIfAbsent(cls, c -> new HashMap<>());
+
+        Method idGetter = JsonApiAnnotationAnalyzer.getIdGetter(cls);
+
+        try {
+            includeObjects.put(idGetter.invoke(object), object);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            throw new RuntimeException(String.format("Error accessing json object id: %s", cls.getName()), e);
+        }
+    }
+
+    public void includeAll(Collection<Object> objects) {
+        for (Object object : objects) {
+            include(object);
+        }
+    }
+
+    public Set<Object> flattenIncludes() {
+        Set<Object> includeObjects = new HashSet<>();
+        for (Map<Object, Object> typeObjects : includes.values()) {
+            includeObjects.addAll(typeObjects.values());
+        }
+
+        return includeObjects;
     }
 
     /////////////////////////

@@ -60,6 +60,9 @@ class JsonApiSerializer {
                 } else if (isObjectJsonApiObjectList(object)) {
                     includes.addAll(
                             this.serializeJsonApiObjectList((List) object, serializationContext, jsonGenerator, serializerProvider));
+                } else if (JsonApiAnnotationAnalyzer.RelationshipStub.class.equals(object.getClass())) {
+                    JsonSerializer dataSerializer = serializerProvider.findValueSerializer(object.getClass());
+                    dataSerializer.serialize(object, jsonGenerator, serializerProvider);
                 } else {
                     String issue = "In order to be serialized in the \"" + serializationContext.toString() + "\" JsonAPI context" +
                             " object type " + object.getClass().getName() + " needs to be JsonAPIary annotated (@JsonApiType, " +
@@ -125,6 +128,10 @@ class JsonApiSerializer {
                 JsonApiAnnotationAnalyzer.fetchJsonsByAnnotation(jsonApiObject, JsonApiMeta.class, jsonGenerator);
         Map<String, Object> relationships =
                 JsonApiAnnotationAnalyzer.fetchJsonsByAnnotation(jsonApiObject, JsonApiRelationship.class, jsonGenerator);
+        Map<String, Object> id_relationships =
+                JsonApiAnnotationAnalyzer.fetchJsonsByAnnotation(jsonApiObject, JsonApiIdRelationship.class, jsonGenerator);
+
+        relationships.putAll(id_relationships);
 
         Set<Object> includes = new HashSet<Object>();
 

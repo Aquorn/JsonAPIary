@@ -48,7 +48,8 @@ public class JsonApiEnvelopeSerializer extends StdSerializer<JsonApiEnvelope> {
             JsonApiEnvelope jsonApiEnvelope,
             JsonGenerator jsonGenerator,
             SerializerProvider serializerProvider) throws IOException {
-        Set<Object> includes = new HashSet<Object>();
+//        Set<Object> includes = new HashSet<Object>();
+        Set<Object> includes = jsonApiEnvelope.flattenIncludes();
 
         // Create the JsonAPI "envelope" object, the call down expanding the "has-a" objects accordingly //
         jsonGenerator.writeStartObject();

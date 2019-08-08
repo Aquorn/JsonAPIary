@@ -1,2 +1,7 @@
 target/***
 test-results/***
+
+\.idea/
+target/
+
+jsonapiary\.iml

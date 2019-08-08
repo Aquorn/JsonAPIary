@@ -5,6 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonMappingException;
 
+import java.beans.IntrospectionException;
+import java.beans.PropertyDescriptor;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
@@ -21,6 +23,11 @@ public class JsonApiAnnotationAnalyzer {
     // Attributes //
     ////////////////
 
+    private static final Map<Class<?>, Method> jsonObjectIdGetter = new HashMap<>();
+    private static final Map<Class<?>, Method> jsonObjectIdSetter = new HashMap<>();
+    private static final Map<Class<?>, Map<String, Method>> jsonObjectAttributeGetters = new HashMap<>();
+    private static final Map<Class<?>, Map<String, Method>> jsonObjectAttributeSetters = new HashMap<>();
+
     private static final Class<? extends Annotation> CATCH_ALL_JSON_API_OBJECT = JsonApiMeta.class;
 
     /////////////////
@@ -35,6 +42,129 @@ public class JsonApiAnnotationAnalyzer {
     ////////////////////
     // Public Methods //
     ////////////////////
+
+    public static void cacheClass(Class<?> clazz) {
+        for (Field field : clazz.getDeclaredFields()) {
+            boolean isIdField = field.isAnnotationPresent(JsonApiId.class);
+            boolean isAttributeField = field.isAnnotationPresent(JsonApiAttribute.class);
+
+            if (!(isIdField || isAttributeField)) {
+                continue;
+            }
+
+            String fieldName = field.getName();
+
+            PropertyDescriptor pd = null;
+
+            try {
+                pd = new PropertyDescriptor(fieldName, clazz);
+            } catch (IntrospectionException e) {
+                throw new RuntimeException(String.format("%s.%s has json field annotation but could not acquire get/set methods", clazz.getName(), fieldName), e);
+            }
+
+            if (isIdField) {
+                jsonObjectIdGetter.put(clazz, pd.getReadMethod());
+                jsonObjectIdSetter.put(clazz, pd.getWriteMethod());
+            }
+
+            if (isAttributeField) {
+                Map<String, Method> getters = jsonObjectAttributeGetters.computeIfAbsent(clazz, c -> new HashMap<>());
+                Map<String, Method> setters = jsonObjectAttributeSetters.computeIfAbsent(clazz, c -> new HashMap<>());
+
+                getters.put(fieldName, pd.getReadMethod());
+                setters.put(fieldName, pd.getWriteMethod());
+            }
+        }
+    }
+
+    private static Method getIdMethod(Map<Class<?>, Method> map, Class<?> cls) {
+        Method method = map.get(cls);
+
+        if (method == null) {
+            cacheClass(cls);
+        }
+
+        return map.get(cls);
+    }
+
+    public static Method getIdGetter(Class<?> cls) {
+        return getIdMethod(jsonObjectIdGetter, cls);
+    }
+
+    public static Method getIdSetter(Class<?> cls) {
+        return getIdMethod(jsonObjectIdSetter, cls);
+    }
+
+    public static Method getAttributeMethod(Map<Class<?>, Map<String, Method>> map, Class<?> cls, String fieldName) {
+        Map<String, Method> methods = map.get(cls);
+
+        if (methods == null) {
+            cacheClass(cls);
+        }
+
+        methods = map.get(cls);
+
+        return methods.get(fieldName);
+    }
+
+    public static Map<String, Method> getJsonGetters(Class<?> cls) {
+        return jsonObjectAttributeGetters.get(cls);
+    }
+
+    public static Method getAttributeGetter(Class<?> cls, String fieldName) {
+        return getAttributeMethod(jsonObjectAttributeGetters, cls, fieldName);
+    }
+
+    public static Map<String, Method> getJsonSetters(Class<?> cls) {
+        return jsonObjectAttributeSetters.get(cls);
+    }
+
+    public static Method getAttributeSetter(Class<?> cls, String fieldName) {
+        return getAttributeMethod(jsonObjectAttributeSetters, cls, fieldName);
+    }
+
+    public static class RelationshipStub {
+
+        public static class InternalStub {
+            private Object id;
+            private String type;
+
+            public InternalStub(Object id, String type) {
+                this.id = id;
+                this.type = type;
+            }
+
+            public Object getId() {
+                return id;
+            }
+
+            public void setId(Object id) {
+                this.id = id;
+            }
+
+            public String getType() {
+                return type;
+            }
+
+            public void setType(String type) {
+                this.type = type;
+            }
+        }
+
+        private InternalStub data;
+
+        public RelationshipStub(Object id, String type) {
+            this.data = new InternalStub(id, type);
+        }
+
+        public InternalStub getData() {
+            return data;
+        }
+
+        public void setData(InternalStub data) {
+            this.data = data;
+        }
+    }
 
     /**
      * Returns a map of JSON API keys (Strings) and their unserialized value (Object), based on the annotations
@@ -62,12 +192,24 @@ public class JsonApiAnnotationAnalyzer {
             type = type.getSuperclass();
         }
 
+        boolean isIdRelationship = JsonApiIdRelationship.class.equals(annotation);
+
         for(Field field : completeFields) {
             if(field.isAnnotationPresent(annotation)) {
-                // This Field is EXPLICITLY part of the annotation //
-                jsons.put(
-                        fetchFieldKey(field, annotation),
-                        fetchFieldValue(jsonApiObject, field, jsonGenerator));
+                if (isIdRelationship) {
+                    JsonApiIdRelationship typeAnnotation = field.getAnnotation(JsonApiIdRelationship.class);
+                    RelationshipStub relationshipStub = new RelationshipStub(fetchFieldValue(jsonApiObject, field, jsonGenerator), typeAnnotation.value());
+//                    relationshipStub.put("id", fetchFieldValue(jsonApiObject, field, jsonGenerator));
+//                    relationshipStub.put("type", typeAnnotation.value());
+
+                    jsons.put(fetchFieldKey(field, annotation), relationshipStub);
+                } else {
+                    // This Field is EXPLICITLY part of the annotation //
+                    jsons.put(
+                            fetchFieldKey(field, annotation),
+                            fetchFieldValue(jsonApiObject, field, jsonGenerator));
+                }
+
             } else if(isOtherJsonApiAnnotationPresent(field.getDeclaredAnnotations(), annotation)) {
                 // This Field is explicitly NOT part of the annotation //
                 continue;
@@ -95,10 +237,19 @@ public class JsonApiAnnotationAnalyzer {
 
         for(Method method : completeMethods) {
             if(method.isAnnotationPresent(annotation)) {
-                // This Method is EXPLICITLY part of the annotation //
-                jsons.put(
-                        fetchMethodKey(method,  annotation),
-                        fetchMethodValue(jsonApiObject, method, jsonGenerator));
+                if (isIdRelationship) {
+                    Map<String, Object> relationshipStub = new HashMap<>();
+                    relationshipStub.put("id", fetchMethodValue(jsonApiObject, method, jsonGenerator));
+                    relationshipStub.put("type", method.getAnnotation(JsonApiIdRelationship.class).value());
+
+                    jsons.put(fetchMethodKey(method, annotation), relationshipStub);
+                } else {
+                    // This Method is EXPLICITLY part of the annotation //
+                    jsons.put(
+                            fetchMethodKey(method,  annotation),
+                            fetchMethodValue(jsonApiObject, method, jsonGenerator));
+                }
+
             } else if(isOtherJsonApiAnnotationPresent(method.getDeclaredAnnotations(), annotation)) {
                 // This Method is explicitly NOT part of the annotation //
                 continue;
