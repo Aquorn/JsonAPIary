@@ -63,6 +63,11 @@ class JsonApiSerializer {
                 } else if (JsonApiAnnotationAnalyzer.RelationshipStub.class.equals(object.getClass())) {
                     JsonSerializer dataSerializer = serializerProvider.findValueSerializer(object.getClass());
                     dataSerializer.serialize(object, jsonGenerator, serializerProvider);
+                } else if  (isObjectJsonApiObjectMap(object)) {
+//                    jsonGenerator.writeStartObject();
+//                    jsonGenerator.writeFieldName(JsonApiKeyConstants.RELATIONSHIPS_KEY);
+                    includes.addAll(this.serializeJsonApiObjectMap((Map) object, serializationContext, jsonGenerator, serializerProvider));
+//                    jsonGenerator.writeEndObject();
                 } else {
                     String issue = "In order to be serialized in the \"" + serializationContext.toString() + "\" JsonAPI context" +
                             " object type " + object.getClass().getName() + " needs to be JsonAPIary annotated (@JsonApiType, " +
@@ -130,8 +135,11 @@ class JsonApiSerializer {
                 JsonApiAnnotationAnalyzer.fetchJsonsByAnnotation(jsonApiObject, JsonApiRelationship.class, jsonGenerator);
         Map<String, Object> id_relationships =
                 JsonApiAnnotationAnalyzer.fetchJsonsByAnnotation(jsonApiObject, JsonApiIdRelationship.class, jsonGenerator);
+        Map<String, Object> id_container_relationships =
+                JsonApiAnnotationAnalyzer.fetchJsonsByAnnotation(jsonApiObject, JsonApiIdRelationshipContainer.class, jsonGenerator);
 
         relationships.putAll(id_relationships);
+        relationships.putAll(id_container_relationships);
 
         Set<Object> includes = new HashSet<Object>();
 
@@ -252,9 +260,78 @@ class JsonApiSerializer {
         return includes;
     }
 
+    public Set<Object> serializeJsonApiObjectMap(
+            Map<Object, Object> jsonApiObjectMap,
+            JsonApiObjectContext serializationContext,
+            JsonGenerator jsonGenerator,
+            SerializerProvider serializerProvider) throws IOException {
+
+        Set<Object> includes = new HashSet<Object>();
+
+        switch(serializationContext) {
+            case RELATIONSHIP:
+                jsonGenerator.writeStartObject();
+                jsonGenerator.writeFieldName(JsonApiKeyConstants.DATA_KEY);
+                break;
+            default:
+                // No special serializations for this context
+        }
+
+//        jsonGenerator.writeStartObject();
+        jsonGenerator.writeStartArray();
+        for(Map.Entry element : jsonApiObjectMap.entrySet()) {
+//            jsonGenerator.writeFieldName(element.getKey().toString());
+//            jsonGenerator.writeStartObject();
+//            jsonGenerator.writeFieldName(JsonApiKeyConstants.DATA_KEY);
+
+            switch (serializationContext) {
+                case RELATIONSHIP:
+
+                    this.serializeJsonApiObject(
+                            element.getValue(),
+                            JsonApiObjectContext.RESOURCE_LINKAGE,
+//                            JsonApiObjectContext.RESOURCE_LINKAGE_MAP,
+                            jsonGenerator,
+                            serializerProvider);
+                    includes.add(element.getValue());
+                    break;
+                default:
+                    includes.addAll(
+                            this.serializeJsonApiObject(
+                                    element.getValue(),
+                                    serializationContext,
+                                    jsonGenerator,
+                                    serializerProvider));
+            }
+
+//            jsonGenerator.writeEndObject();
+        }
+//        jsonGenerator.writeEndObject();
+        jsonGenerator.writeEndArray();
+
+        switch(serializationContext) {
+            case RELATIONSHIP:
+                jsonGenerator.writeEndObject();
+                break;
+            default:
+                // No special serializations for this context
+        }
+
+        return includes;
+    }
+
     /////////////////////
     // Private Methods //
     /////////////////////
+
+    private void serializeIdAndTypeMap(Map<Object, Object> map, Map<String, Object> idMap, JsonGenerator jsonGenerator, SerializerProvider serializerProvider) throws IOException {
+        for (Map.Entry entry : map.entrySet()) {
+            jsonGenerator.writeFieldName(entry.getKey().toString());
+            jsonGenerator.writeStartObject();
+            serializeIdAndType(entry.getValue(), idMap, jsonGenerator, serializerProvider);
+            jsonGenerator.writeEndObject();
+        }
+    }
 
     private void serializeIdAndType(
             Object jsonApiObject,
@@ -314,8 +391,10 @@ class JsonApiSerializer {
                 Object value = map.get(key);
                 if(value != null) {
                     jsonGenerator.writeFieldName(key);
+
                     includes.addAll(
                             this.serializeRandomObject(value, serializationContext, jsonGenerator, serializerProvider));
+
                 }
             }
 
@@ -328,6 +407,25 @@ class JsonApiSerializer {
     private boolean isObjectJsonApiObject(
             Object object) {
         return object.getClass().isAnnotationPresent(JsonApiType.class);
+    }
+
+    private boolean isObjectJsonApiObjectMap(Object object) {
+        if (object == null || !(object instanceof Map)) {
+            return false;
+        }
+
+        Map map = (Map) object;
+
+        if (map.isEmpty()) {
+            return true;
+        }
+
+        boolean jsonApi = true;
+        for (Object element : map.values()) {
+            jsonApi &= element.getClass().isAnnotationPresent(JsonApiType.class);
+        }
+
+        return jsonApi;
     }
 
     private boolean isObjectJsonApiObjectList(

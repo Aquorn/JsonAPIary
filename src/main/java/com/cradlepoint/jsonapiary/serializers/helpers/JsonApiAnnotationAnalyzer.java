@@ -193,16 +193,47 @@ public class JsonApiAnnotationAnalyzer {
         }
 
         boolean isIdRelationship = JsonApiIdRelationship.class.equals(annotation);
+        boolean isIdRealtionshipContainer = JsonApiIdRelationshipContainer.class.equals(annotation);
+//        boolean isIdRealtionshipContainer = false;
 
         for(Field field : completeFields) {
             if(field.isAnnotationPresent(annotation)) {
+
+
                 if (isIdRelationship) {
                     JsonApiIdRelationship typeAnnotation = field.getAnnotation(JsonApiIdRelationship.class);
-                    RelationshipStub relationshipStub = new RelationshipStub(fetchFieldValue(jsonApiObject, field, jsonGenerator), typeAnnotation.value());
-//                    relationshipStub.put("id", fetchFieldValue(jsonApiObject, field, jsonGenerator));
-//                    relationshipStub.put("type", typeAnnotation.value());
 
+                    RelationshipStub relationshipStub = new RelationshipStub(fetchFieldValue(jsonApiObject, field, jsonGenerator), typeAnnotation.value());
                     jsons.put(fetchFieldKey(field, annotation), relationshipStub);
+
+                } else if (isIdRealtionshipContainer) {
+                    JsonApiIdRelationshipContainer typeAnnotation = field.getAnnotation(JsonApiIdRelationshipContainer.class);
+
+//                    RelationshipStub relationshipStub = new RelationshipStub(fetchFieldValue(jsonApiObject, field, jsonGenerator), typeAnnotation.value());
+//                    jsons.put(fetchFieldKey(field, annotation), relationshipStub);
+                    if (typeAnnotation != null) {
+                        Object value = fetchFieldValue(jsonApiObject, field, jsonGenerator);
+                        if (value instanceof Map) {
+                            Map<?,?> map = (Map) value;
+                            Map<Object, RelationshipStub> relationshipStubMap = new HashMap<>();
+//                            for (Map.Entry<?, ?> entry : map.entrySet()) {
+////                                relationshipStubMap.put(entry.getKey(), new RelationshipStub(entry.getValue(), typeAnnotation.value()));
+//                                relationshipStubMap.put(entry.getKey(), entry.getValue());
+//                            }
+//                            jsons.put(fetchFieldKey(field, annotation), relationshipStubMap);
+                            jsons.put(fetchFieldKey(field, annotation), value);
+                        } else {
+                            throw new IllegalArgumentException("JsonApiIdRelationshipContainer annotation must be used on a map");
+                        }
+//                        jsons.put(
+//                                fetchFieldKey(field, annotation),
+//                                new RelationshipMap((Map<?,?>) fetchFieldValue(jsonApiObject, field, jsonGenerator)));
+                    }
+
+//                            fetchFieldValue(jsonApiObject, field, jsonGenerator));
+
+//                    throw new IllegalArgumentException("JsonApiIdRelationshipContainer annotation must be used on a map");
+
                 } else {
                     // This Field is EXPLICITLY part of the annotation //
                     jsons.put(
@@ -286,6 +317,8 @@ public class JsonApiAnnotationAnalyzer {
             key = field.getAnnotation(JsonApiMeta.class).value();
         } else if(jsonApiAnnotation == JsonApiRelationship.class && field.isAnnotationPresent(JsonApiRelationship.class)) {
             key = field.getAnnotation(JsonApiRelationship.class).value();
+        } else if (jsonApiAnnotation == JsonApiIdRelationship.class && field.isAnnotationPresent(JsonApiIdRelationship.class)) {
+            key = field.getAnnotation(JsonApiIdRelationship.class).property();
         }
 
         if(key != null && !key.isEmpty()) {
