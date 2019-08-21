@@ -77,7 +77,7 @@ public class JsonApiEnvelope<T> {
         }
     }
 
-    public void includeAll(Collection<Object> objects) {
+    public void includeAll(Collection<?> objects) {
         for (Object object : objects) {
             include(object);
         }
